@@ -51,5 +51,4 @@ func main() {
 	logger.InfoContext(ctx, "gracefully shutting down...")
 
 	srv.Close()
-	logger.InfoContext(ctx, "finished")
 }

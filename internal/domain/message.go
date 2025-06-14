@@ -2,14 +2,13 @@ package domain
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/kiryu2k/dns-server/pkg/utils"
 )
 
 type DnsMessage struct {
-	Header   dnsHeader
-	Question dnsQuestion
+	Header    dnsHeader
+	Questions []dnsQuestion
 }
 
 func NewMessage(packetId uint16) DnsMessage {
@@ -22,14 +21,17 @@ func MessageFromBytes(bytes []byte) (DnsMessage, error) {
 	if len(bytes) < headerSize {
 		return DnsMessage{}, fmt.Errorf("unexpected message size: %d", len(bytes))
 	}
+
+	header := decodeHeader(bytes[:headerSize])
+
 	return DnsMessage{
-		Header:   decodeHeader(bytes[:headerSize]),
-		Question: decodeQuestion(bytes[headerSize:]),
+		Header:    header,
+		Questions: decodeQuestions(bytes[headerSize:], header.QdCount),
 	}, nil
 }
 
 func (m DnsMessage) Encode() []byte {
-	return append(m.encodeHeader(), m.encodeQuestion()...)
+	return append(m.encodeHeader(), m.encodeQuestions()...)
 }
 
 func (m DnsMessage) encodeHeader() []byte {
@@ -45,17 +47,12 @@ func (m DnsMessage) encodeHeader() []byte {
 	return utils.AppendBigEndianUint16(buf, m.Header.Id, fields, m.Header.QdCount, m.Header.AnCount, m.Header.NsCount, m.Header.ArCount)
 }
 
-func (m DnsMessage) encodeQuestion() []byte {
-	buf := make([]byte, 0)
-	labels := strings.Split(m.Question.name, ".")
-	for _, v := range labels {
-		buf = append(buf, byte(len(v)))
-		buf = append(buf, []byte(v)...)
+func (m DnsMessage) encodeQuestions() []byte {
+	result := make([]byte, 0)
+	for _, q := range m.Questions {
+		result = append(result, q.encode()...)
 	}
-	buf = append(buf, '\x00')
-
-	return utils.AppendBigEndianUint16(buf, m.Question.recordType, m.Question.recordClass)
-
+	return result
 }
 
 func (m DnsMessage) AsReply() DnsMessage {
@@ -63,8 +60,8 @@ func (m DnsMessage) AsReply() DnsMessage {
 	return m
 }
 
-func (m DnsMessage) WithQuestion(question dnsQuestion) DnsMessage {
-	m.Header.QdCount++
-	m.Question = question
+func (m DnsMessage) WithQuestions(questions ...dnsQuestion) DnsMessage {
+	m.Header.QdCount += uint16(len(questions))
+	m.Questions = append(m.Questions, questions...)
 	return m
 }

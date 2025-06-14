@@ -128,7 +128,7 @@ func (s *dns) startReadingPackets(ctx context.Context, out chan<- packet) {
 func (s *dns) handlePacket(ctx context.Context, p packet) {
 	response := domain.NewMessage(p.msg.Header.Id).
 		AsReply().
-		WithQuestion(p.msg.Question).
+		WithQuestions(p.msg.Questions...).
 		Encode()
 	if _, err := s.udpConn.WriteToUDP(response, p.from); err != nil {
 		s.logger.ErrorContext(ctx, errors.WithMessage(err, "write to udp").Error())
