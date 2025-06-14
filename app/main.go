@@ -1,50 +1,55 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"net"
+	"log/slog"
+	"os"
+	"os/signal"
+	"runtime"
+	"syscall"
 
-	"github.com/kiryu2k/dns-server/internal/domain"
+	"github.com/kiryu2k/dns-server/internal/server"
+	"github.com/pkg/errors"
+)
+
+const (
+	host = "localhost"
+	port = "2053"
 )
 
 func main() {
-	udpAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:2053")
+	defer func() {
+		fmt.Printf("Total goroutines before exit: %d\n", runtime.NumGoroutine())
+	}()
+
+	var (
+		logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			AddSource:   false,
+			Level:       slog.LevelDebug,
+			ReplaceAttr: nil,
+		}))
+		ctx = context.Background()
+	)
+
+	srv, err := server.NewDns(host, port, logger)
 	if err != nil {
-		fmt.Println("Failed to resolve UDP address:", err)
+		logger.ErrorContext(ctx, errors.WithMessage(err, "new dns server").Error())
 		return
 	}
 
-	udpConn, err := net.ListenUDP("udp", udpAddr)
-	if err != nil {
-		fmt.Println("Failed to bind to address:", err)
-		return
-	}
-	defer func() {
-		if err := udpConn.Close(); err != nil {
-			fmt.Println("failed to close upd connection:", err)
+	go func() {
+		logger.InfoContext(ctx, "starting dns server...")
+		if err := srv.ListenAndServe(ctx); err != nil {
+			logger.ErrorContext(ctx, errors.WithMessage(err, "listen and serve dns server").Error())
 		}
 	}()
 
-	buf := make([]byte, 512)
-	for {
-		_, source, err := udpConn.ReadFromUDP(buf)
-		if err != nil {
-			fmt.Println("Error receiving data:", err)
-			break
-		}
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+	logger.InfoContext(ctx, "gracefully shutting down...")
 
-		msg, err := domain.MessageFromBytes(buf)
-		if err != nil {
-			fmt.Println("new message:", err)
-			break
-		}
-
-		response := domain.NewMessage(msg.Header.Id).
-			AsReply().
-			WithQuestion(msg.Question).
-			Encode()
-		if _, err = udpConn.WriteToUDP(response, source); err != nil {
-			fmt.Println("Failed to send response:", err)
-		}
-	}
+	srv.Close()
+	logger.InfoContext(ctx, "finished")
 }
